@@ -108,8 +108,8 @@ if(params.scoring != null){
     }
 }
 
-trainingTable = file(params.trainingTable)
-targetTable = file(params.targetTable)
+if(params.trainingTable != null)trainingTable = file(params.trainingTable)
+if(params.targetTable != null) targetTable = file(params.targetTable)
 if(params.duplicatedSeqVCF != null) duplicatedSeqVCF = file(params.duplicatedSeqVCF)
 if(params.duplicatedSeqCov != null) duplicatedSeqCov = file(params.duplicatedSeqCov)
 if(params.modelSNV != null) modelSNV = file(params.modelSNV)
