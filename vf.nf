@@ -41,7 +41,6 @@ if (params.help) {
     log.info 'nextflow run vf.nf --mode learning --truthVCF GIAB.vcf --newSeqVCF our_GIAB_seq.vcf'
     log.info ''
     log.info 'Mandatory arguments:'
-    log.info '    --ref                              FILE (with index)    Reference fasta file indexed.'
     log.info '    --learning AND/OR --scoring        STRING               Indicate which mode (learning or scoring) to run.'
     log.info ''
     log.info '    if --learning:'
@@ -68,63 +67,74 @@ if (params.help) {
     exit 0
 }
 
-params.mode = null
-params.toTrainVCF = null
-params.truthVCF = null
+params.learning = null
+params.scoring = null
+params.trainingTable = null
+params.targetTable = null
 params.duplicatedSeqVCF = null
 params.duplicatedSeqCov = null
-params.cpu = 1
+params.modelSNV = null
+params.modelINDEL = null
+params.features = null
 params.output_folder = 'vf_output'
 params.nsplit = 1
 params.needlestack = null
 
-if(params.mode == null){
-  exit 1, "Please specify a mode: --mode [learning,scoring]"
+if(params.learning == null & params.scoring == null){
+  exit 1, "Please specify a mode: --learning and/or --scoring"
 }
 
-if(params.mode == "learning"){
-    if (params.toTrainVCF == null){
-    exit 1, "Please specify a VCF to train the model: --toTrainVCF myfile.vcf"
+if(params.learning != null){
+    if (params.trainingTable == null){
+    exit 1, "Please specify a table file to train the model: --trainingTable myfile.txt"
     }
-    if(params.truthVCF == null && params.duplicatedSeqVCF == null){
-    exit 1, "Please specify a VCF to assign TP/FP status: --truthVCF myfile.vcf OR --duplicatedSeqVCF myfile.vcf"
+    if (params.features == null & params.needlestack == null){
+    exit 1, "Please specify the features if calling was not done with needlestack (--needlestack option)"
     }
-    if(params.truthVCF != null && params.duplicatedSeqVCF != null){
-    exit 1, "Please specify either --truthVCF myfile.vcf or --duplicatedSeqVCF, not both"
+    if((params.duplicatedSeqVCF != null && params.duplicatedSeqCov == null) || (params.duplicatedSeqVCF == null && params.duplicatedSeqCov != null)){
+    exit 1, "Please provide both --duplicatedSeqVCF and --duplicatedSeqCov"
     }
-    if(params.duplicatedSeqVCF != null && params.duplicatedSeqCov == null){
-    exit 1, "Please provide --duplicatedSeqCov input using iarcbioinfo/mpileup-nf pipeline on BAM and BED used to generate --duplicatedSeqVCF"
+    if(params.duplicatedSeqVCF == null && params.duplicatedSeqCov == null){
+    "Caution: please make sure that --trainingTable file contains a column 'status'"
     }
 }
 
-truthVCF = file(params.truthVCF)
-toTrainVCF = file(params.toTrainVCF)
-duplicatedSeqVCF = file(params.duplicatedSeqVCF)
-duplicatedSeqCov = file(params.duplicatedSeqCov)
+if(params.scoring != null){
+    if (params.targetTable == null){
+      exit 1, "Please specify a target table file to predict the status: --targetTable myfile.txt"
+    }
+    if (params.learning == null && (params.modelSNV == null || params.modelINDEL == null)) {
+      exit 1, "Please provide trained models when --learning mode is inactivated (e.g. --modelSNV msnv.Rdata --modelINDEL mindel.Rdata)"
+    }
+}
+
+trainingTable = file(params.trainingTable)
+targetTable = file(params.targetTable)
+if(params.duplicatedSeqVCF != null) duplicatedSeqVCF = file(params.duplicatedSeqVCF)
+if(params.duplicatedSeqCov != null) duplicatedSeqCov = file(params.duplicatedSeqCov)
+if(params.modelSNV != null) modelSNV = file(params.modelSNV)
+if(params.modelINDEL != null) modelINDEL = file(params.modelINDEL)
+if(params.needlestack != null) params.features = "RVSB,QVAL,AF,ERR_INFO,DP,medianDP_INFO,FS,MIN_DIST,AO,QUAL,MaxRatioWin,NbVarWin,IoD,HpLength,N_QVAL_20_50_INFO"
 
 if(params.mode == "learning"){
-
-  if(params.truthVCF != null){
-
-  }
 
   if(params.duplicatedSeqVCF != null){
 
-      process splitVCF {
+      process splitTrainingTable {
         input:
-        file toTrainVCF
+        file trainingTable
 
         output:
-        file 'split*' into splitted_vcf mode flatten
+        file 'split*' into splitted_trainingTable mode flatten
 
         shell:
         '''
-        zcat !{toTrainVCF} | sed '/^#CHROM/q' | grep -v "<redacted>" > header
-        ((nb_total_lines= $((`zcat !{toTrainVCF} | wc -l`)) ))
+        head -n1 !{trainingTable} | sed '/^#CHROM/q' | grep -v "<redacted>" > header
+        ((nb_total_lines= $((`zcat !{trainingTable} | wc -l`)) ))
         ((core_lines = $nb_total_lines - $((`cat header | wc -l`)) ))
         ((lines_per_file = ( $core_lines + !{params.nsplit} - 1) / !{params.nsplit}))
         ((start=( $((`cat header | wc -l`)) +1 ) ))
-        zcat !{toTrainVCF} | tail -n+$start | split -l $lines_per_file -a 10 --filter='{ cat header; cat; } | bgzip > $FILE.gz' - split_
+        zcat !{trainingTable} | tail -n+$start | split -l $lines_per_file -a 10 --filter='{ cat header; cat; } | bgzip > $FILE.gz' - split_
         '''
       }
 
@@ -133,67 +143,63 @@ if(params.mode == "learning"){
 
         input:
         file duplicatedSeqCov
-        file svcf from splitted_vcf
+        file strainingTable from splitted_trainingTable
 
         output:
-        file "*addCoverage.vcf" into toTrainVCFCov mode flatten
+        file "*addCoverage.vcf" into trainingTableCov mode flatten
         file  "*.pdf" into PDFoutput
 
         shell:
-        remove_bc_arg = "${params.caller}" == "needlestack" ? "--remove_bc" : ""
+        remove_bc_arg = "${params.needlestack}" != null ? "--remove_bc" : ""
         '''
-        !{baseDir}bin/add_coverage.r --coverage=!{duplicatedSeqCov} --VCFToAddCoverage=!{svcf} !{remove_bc_arg}
-        '''
-      }
-
-      process VCFToTable {
-        publishDir params.output_folder+'/INFOGENO/', mode: 'move', pattern: '*.pdf'
-
-        input:
-        file toTrainVCFCovFile from toTrainVCFCov
-
-        output:
-        file "*.txt" into toTrainTable
-        file  "*.pdf" into PDFoutput
-
-        shell:
-        '''
-        !{baseDir}bin/VCF_to_table.r --vcf=!{toTrainVCFCovFile}
+        !{baseDir}bin/add_coverage.r --coverage=!{duplicatedSeqCov} --table=!{strainingTable} !{remove_bc_arg} --plot_coverage
         '''
       }
 
-if(params.caller == 'needlestack'){
-  process AddTableFeatures {
-    publishDir params.output_folder+'/INFOGENO/', mode: 'move', pattern: '*.pdf'
+      if(params.caller == 'needlestack'){
+        process AddTableFeatures {
+          publishDir params.output_folder+'/INFOGENO/', mode: 'move', pattern: '*.pdf'
 
-    input:
-    file table from toTrainTable
+          input:
+          file table from trainingTableCov
 
-    output:
-    file "*.txt" into toTrainTableFeatures
+          output:
+          file "*.txt" into trainingTableCov_ready
 
-    shell:
-    '''
-    !{baseDir}bin/add_calling_features.r --table=!{table}
-    '''
-  }
-} else { toTrainTable.into(toTrainTableFeatures) }
+          shell:
+          '''
+          !{baseDir}bin/split_INFO_GENOTYPE.r --table=!{table} --split_info --split_geno --plots
+          '''
+        }
+      } else { trainingTableCov.into(trainingTableCov_ready) }
+
+      process addStatus {
+
+      input:
+      file table from trainingTableCov_ready
+      file duplicatedSeqVCF
+
+      shell:
+      to_log10_arg = "${params.needlestack}" != null ? "--to_log10=ERR_INFO" : ""
+      variable_to_plot_arg = "${params.needlestack}" != null ? "--variable_to_plot=ERR_INFO,RVSB_INFO,AF,FS_INFO,REVEL,PopFreqMax" : ""
+      reformat_indels_arg = "${params.needlestack}" != null ? "--reformat_indels" : ""
+      !{baseDir}bin/add_positive_status.r --table=!{table} --vcf=!{duplicatedSeqVCF} !{to_log10_arg} !{variable_to_plot_arg} !{reformat_indels_arg}
+
+      }
 
       process mergeTables {
 
-        input:
-        file all_table from toTrainTableFeatures.collect()
+      input:
+      file all_table from toTrainTableFeatures.collect()
 
-        output:
-        file "*table.txt" into merged_table
+      output:
+      file "*table.txt" into merged_table
 
-        shell:
-        '''
-        head -n1 !{all_table[0]} > !{params.toTrainVCF.baseName}_table.txt
-        awk 'FNR>1' !{all_table} >> !{params.toTrainVCF.baseName}_table.txt
-        '''
+      shell:
+      '''
+      head -n1 !{all_table[0]} > !{params.toTrainVCF.baseName}_table.txt
+      awk 'FNR>1' !{all_table} >> !{params.toTrainVCF.baseName}_table.txt
+      '''
       }
-
-    }
   }
 }
