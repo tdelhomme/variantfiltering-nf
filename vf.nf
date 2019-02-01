@@ -152,12 +152,12 @@ if(params.mode == "learning"){
         shell:
         remove_bc_arg = "${params.needlestack}" != null ? "--remove_bc" : ""
         '''
-        !{baseDir}bin/add_coverage.r --coverage=!{duplicatedSeqCov} --table=!{strainingTable} !{remove_bc_arg} --plot_coverage
+        !{baseDir}/bin/add_coverage.r --coverage=!{duplicatedSeqCov} --table=!{strainingTable} !{remove_bc_arg} --plot_coverage
         '''
       }
 
       if(params.caller == 'needlestack'){
-        process AddTableFeatures {
+        process splitInfoGeno{
           publishDir params.output_folder+'/INFOGENO/', mode: 'move', pattern: '*.pdf'
 
           input:
@@ -168,7 +168,7 @@ if(params.mode == "learning"){
 
           shell:
           '''
-          !{baseDir}bin/split_INFO_GENOTYPE.r --table=!{table} --split_info --split_geno --plots
+          !{baseDir}/bin/split_INFO_GENOTYPE.r --table=!{table} --split_info --split_geno --plots
           '''
         }
       } else { trainingTableCov.into(trainingTableCov_ready) }
@@ -183,7 +183,9 @@ if(params.mode == "learning"){
       to_log10_arg = "${params.needlestack}" != null ? "--to_log10=ERR_INFO" : ""
       variable_to_plot_arg = "${params.needlestack}" != null ? "--variable_to_plot=ERR_INFO,RVSB_INFO,AF,FS_INFO,REVEL,PopFreqMax" : ""
       reformat_indels_arg = "${params.needlestack}" != null ? "--reformat_indels" : ""
-      !{baseDir}bin/add_positive_status.r --table=!{table} --vcf=!{duplicatedSeqVCF} !{to_log10_arg} !{variable_to_plot_arg} !{reformat_indels_arg}
+      '''
+      !{baseDir}/bin/add_positive_status.r --table=!{table} --vcf=!{duplicatedSeqVCF} !{to_log10_arg} !{variable_to_plot_arg} !{reformat_indels_arg}
+      '''
 
       }
 
