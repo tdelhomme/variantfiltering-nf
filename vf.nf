@@ -38,7 +38,7 @@ if (params.help) {
     log.info '--------------------------------------------------'
     log.info ''
     log.info 'Usage: '
-    log.info 'nextflow run vf.nf --mode learning --truthVCF GIAB.vcf --newSeqVCF our_GIAB_seq.vcf'
+    log.info 'nextflow run vf.nf --learning --trainingTable table.txt --features AO,DP,QVAL'
     log.info ''
     log.info 'Mandatory arguments:'
     log.info '    --learning AND/OR --scoring        STRING               Indicate which mode (learning or scoring) to run.'
@@ -75,10 +75,15 @@ params.duplicatedSeqVCF = null
 params.duplicatedSeqCov = null
 params.modelSNV = null
 params.modelINDEL = null
-params.features = null
+if(params.needlestack != null) {
+  params.features = "RVSB,QVAL,AF,ERR_INFO,DP,medianDP_INFO,FS,MIN_DIST,AO,QUAL,MaxRatioWin,NbVarWin,IoD,HpLength,N_QVAL_20_50_INFO"
+} else {
+  params.features = null
+}
 params.output_folder = 'vf_output'
 params.nsplit = 1
 params.needlestack = null
+params.remove_bc = null
 
 if(params.learning == null & params.scoring == null){
   exit 1, "Please specify a mode: --learning and/or --scoring"
@@ -108,15 +113,15 @@ if(params.scoring != null){
     }
 }
 
-if(params.trainingTable != null)trainingTable = file(params.trainingTable)
+if(params.trainingTable != null) trainingTable = file(params.trainingTable)
 if(params.targetTable != null) targetTable = file(params.targetTable)
 if(params.duplicatedSeqVCF != null) duplicatedSeqVCF = file(params.duplicatedSeqVCF)
 if(params.duplicatedSeqCov != null) duplicatedSeqCov = file(params.duplicatedSeqCov)
 if(params.modelSNV != null) modelSNV = file(params.modelSNV)
 if(params.modelINDEL != null) modelINDEL = file(params.modelINDEL)
-if(params.needlestack != null) params.features = "RVSB,QVAL,AF,ERR_INFO,DP,medianDP_INFO,FS,MIN_DIST,AO,QUAL,MaxRatioWin,NbVarWin,IoD,HpLength,N_QVAL_20_50_INFO"
+if(params.remove_bc != null) { remove_bc_arg = "--remove_bc" } else { remove_bc_arg = "" }
 
-if(params.mode == "learning"){
+if(params.learning != null){
 
   if(params.duplicatedSeqVCF != null){
 
@@ -130,11 +135,11 @@ if(params.mode == "learning"){
         shell:
         '''
         head -n1 !{trainingTable} | sed '/^#CHROM/q' | grep -v "<redacted>" > header
-        ((nb_total_lines= $((`zcat !{trainingTable} | wc -l`)) ))
+        ((nb_total_lines= $((`cat !{trainingTable} | wc -l`)) ))
         ((core_lines = $nb_total_lines - $((`cat header | wc -l`)) ))
         ((lines_per_file = ( $core_lines + !{params.nsplit} - 1) / !{params.nsplit}))
         ((start=( $((`cat header | wc -l`)) +1 ) ))
-        zcat !{trainingTable} | tail -n+$start | split -l $lines_per_file -a 10 --filter='{ cat header; cat; } | bgzip > $FILE.gz' - split_
+        cat !{trainingTable} | tail -n+$start | split -l $lines_per_file -a 10 --filter='{ cat header; cat; } | bgzip > $FILE.gz' - split_
         '''
       }
 
@@ -150,33 +155,15 @@ if(params.mode == "learning"){
         file  "*.pdf" into PDFoutput
 
         shell:
-        remove_bc_arg = "${params.needlestack}" != null ? "--remove_bc" : ""
         '''
-        !{baseDir}/bin/add_coverage_to_annot.r --coverage=!{duplicatedSeqCov} --table=!{strainingTable} !{remove_bc_arg} --plot_coverage
+        Rscript !{baseDir}/bin/add_coverage_to_annot.r --coverage=!{duplicatedSeqCov} --table=!{strainingTable} !{remove_bc_arg} --plot_coverage
         '''
       }
-
-      if(params.caller == 'needlestack'){
-        process splitInfoGeno{
-          publishDir params.output_folder+'/INFOGENO/', mode: 'move', pattern: '*.pdf'
-
-          input:
-          file table from trainingTableCov
-
-          output:
-          file "*.txt" into trainingTableCov_ready
-
-          shell:
-          '''
-          !{baseDir}/bin/split_INFO_GENOTYPE.r --table=!{table} --split_info --split_geno --plots
-          '''
-        }
-      } else { trainingTableCov.into(trainingTableCov_ready) }
 
       process addStatus {
 
       input:
-      file table from trainingTableCov_ready
+      file table from trainingTableCov
       file duplicatedSeqVCF
 
       output:
@@ -187,34 +174,17 @@ if(params.mode == "learning"){
       variable_to_plot_arg = "${params.needlestack}" != null ? "--variable_to_plot=ERR_INFO,RVSB_INFO,AF,FS_INFO,REVEL,PopFreqMax" : ""
       reformat_indels_arg = "${params.needlestack}" != null ? "--reformat_indels" : ""
       '''
-      !{baseDir}/bin/add_positive_status.r --table=!{table} --vcf=!{duplicatedSeqVCF} !{to_log10_arg} !{variable_to_plot_arg} !{reformat_indels_arg}
+      Rscript !{baseDir}/bin/add_positive_status.r --table=!{table} --vcf=!{duplicatedSeqVCF} !{to_log10_arg} !{variable_to_plot_arg} !{reformat_indels_arg}
       '''
-
       }
-
-      if(params.caller == 'needlestack'){
-        process addFeatures{
-
-          input:
-          file table from trainingTableCov_ready_status
-
-          output:
-          file "*.txt" into trainingTableCov_ready_status_features
-
-          shell:
-          '''
-          !{baseDir}/bin/add_calling_features.r --table=!{table}
-          '''
-        }
-      } else { trainingTableCov_ready_status.into(trainingTableCov_ready_status_features) }
 
       process mergeTables {
 
       input:
-      file all_table from trainingTableCov_ready_status_features.collect()
+      file all_table from trainingTableCov_ready_status.collect()
 
       output:
-      file "*table.txt" into merged_table
+      file "*table.txt" into trainingTable_processed
 
       shell:
       '''
@@ -222,5 +192,78 @@ if(params.mode == "learning"){
       awk 'FNR>1' !{all_table} >> !{params.trainingTable.baseName}_processed_table.txt
       '''
       }
+  }
+
+
+if(params.duplicatedSeqVCF == null) trainingTable_processed = Channel.fromPath(params.trainingTable)
+
+// here we separate splitInfoGeno_needlestack,addFeatures_needlestack to the splitted processes to let the user provide needlestack table with status but without Features
+// nevertheless processes are not splitted so time is big
+  if(params.needlestack != null){
+
+    process splitTrainingTable_needlestack {
+      input:
+      file table from trainingTable_processed
+
+      output:
+      file 'split*' into splitted_Table mode flatten
+
+      shell:
+      '''
+      head -n1 !{table} | sed '/^#CHROM/q' | grep -v "<redacted>" > header
+      ((nb_total_lines= $((`cat !{table} | wc -l`)) ))
+      ((core_lines = $nb_total_lines - $((`cat header | wc -l`)) ))
+      ((lines_per_file = ( $core_lines + !{params.nsplit} - 1) / !{params.nsplit}))
+      ((start=( $((`cat header | wc -l`)) +1 ) ))
+      cat !{table} | tail -n+$start | split -l $lines_per_file -a 10 --filter='{ cat header; cat; } | bgzip > $FILE.gz' - split_
+      '''
+    }
+
+    process splitInfoGeno_needlestack{
+      publishDir params.output_folder+'/INFOGENO/', mode: 'move', pattern: '*.pdf'
+
+      input:
+      file table from splitted_Table
+
+      output:
+      file "*.txt" into splitted_Table_info_geno
+
+      shell:
+      '''
+      Rscript !{baseDir}/bin/split_INFO_GENOTYPE.r --table=!{table} --split_info --split_geno --plots
+      '''
+    }
+
+    process addFeatures_needlestack{
+
+      input:
+      file table from splitted_Table_info_geno
+
+      output:
+      file "*.txt" into splitted_Table_info_geno_features
+
+      shell:
+      '''
+      Rscript !{baseDir}/bin/add_calling_features.r --table=!{table} !{remove_bc_arg}
+      '''
+    }
+
+    process mergeTables_needlestack {
+
+    input:
+    file all_table from splitted_Table_info_geno_features.collect()
+
+    output:
+    file "*table.txt" into trainingTable_final
+
+    shell:
+    '''
+    head -n1 !{all_table[0]} > !{params.trainingTable.baseName}_processed_table.txt
+    awk 'FNR>1' !{all_table} >> !{params.trainingTable.baseName}_processed_table.txt
+    '''
+    }
+
+  } else {
+    trainingTable_processed.into{trainingTable_final}
   }
 }
