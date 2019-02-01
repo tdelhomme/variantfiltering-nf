@@ -146,13 +146,13 @@ if(params.mode == "learning"){
         file strainingTable from splitted_trainingTable
 
         output:
-        file "*addCoverage.vcf" into trainingTableCov mode flatten
+        file "*.txt" into trainingTableCov mode flatten
         file  "*.pdf" into PDFoutput
 
         shell:
         remove_bc_arg = "${params.needlestack}" != null ? "--remove_bc" : ""
         '''
-        !{baseDir}/bin/add_coverage.r --coverage=!{duplicatedSeqCov} --table=!{strainingTable} !{remove_bc_arg} --plot_coverage
+        !{baseDir}/bin/add_coverage_to_annot.r --coverage=!{duplicatedSeqCov} --table=!{strainingTable} !{remove_bc_arg} --plot_coverage
         '''
       }
 
@@ -179,6 +179,9 @@ if(params.mode == "learning"){
       file table from trainingTableCov_ready
       file duplicatedSeqVCF
 
+      output:
+      file "*.txt" into trainingTableCov_ready_status
+
       shell:
       to_log10_arg = "${params.needlestack}" != null ? "--to_log10=ERR_INFO" : ""
       variable_to_plot_arg = "${params.needlestack}" != null ? "--variable_to_plot=ERR_INFO,RVSB_INFO,AF,FS_INFO,REVEL,PopFreqMax" : ""
@@ -189,18 +192,34 @@ if(params.mode == "learning"){
 
       }
 
+      if(params.caller == 'needlestack'){
+        process addFeatures{
+
+          input:
+          file table from trainingTableCov_ready_status
+
+          output:
+          file "*.txt" into trainingTableCov_ready_status_features
+
+          shell:
+          '''
+          !{baseDir}/bin/add_calling_features.r --table=!{table}
+          '''
+        }
+      } else { trainingTableCov_ready_status.into(trainingTableCov_ready_status_features) }
+
       process mergeTables {
 
       input:
-      file all_table from toTrainTableFeatures.collect()
+      file all_table from trainingTableCov_ready_status_features.collect()
 
       output:
       file "*table.txt" into merged_table
 
       shell:
       '''
-      head -n1 !{all_table[0]} > !{params.toTrainVCF.baseName}_table.txt
-      awk 'FNR>1' !{all_table} >> !{params.toTrainVCF.baseName}_table.txt
+      head -n1 !{all_table[0]} > !{params.trainingTable.baseName}_processed_table.txt
+      awk 'FNR>1' !{all_table} >> !{params.trainingTable.baseName}_processed_table.txt
       '''
       }
   }
