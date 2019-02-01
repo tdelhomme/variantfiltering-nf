@@ -19,8 +19,8 @@
 
 log.info ""
 log.info "-------------------------------------------------------------------------"
-log.info "  variant-filtering-nf : Nextflow pipeline for variant confidence scoring"
-log.info "                         based on deep/machine learning algorithm        "
+log.info "  vf-nf : Nextflow pipeline for variant confidence scoring"
+log.info "          based on the random forest algorithm            "
 log.info "-------------------------------------------------------------------------"
 log.info "Copyright (C) IARC/WHO"
 log.info "This program comes with ABSOLUTELY NO WARRANTY; for details see LICENSE"
@@ -38,23 +38,32 @@ if (params.help) {
     log.info '--------------------------------------------------'
     log.info ''
     log.info 'Usage: '
-    log.info 'nextflow run main.nf --mode learning --truthVCF GIAB.vcf --newSeqVCF our_GIAB_seq.vcf'
+    log.info 'nextflow run vf.nf --mode learning --truthVCF GIAB.vcf --newSeqVCF our_GIAB_seq.vcf'
     log.info ''
     log.info 'Mandatory arguments:'
-    log.info '    --ref                  FILE (with index)     Reference fasta file indexed.'
-    log.info '    --mode                 STRING                Indicate which mode (learning or scoring) to run.'
-    log.info '    if --mode learning:'
-    log.info '      --toTrainVCF         VCF                   Variant calls used to train the model, after assigning a TP/FP status.'
-    log.info '      --truthVCF           VCF                   Validated variant calls, used to assign status.'
-    log.info '      OR '
-    log.info '      --duplicatedSeqVCF   VCF                   Variant calls from an other sequencing, used to assign status.'
-    log.info '        AND --duplicatedSeqCov  TXT              File containing for each sequenced position in toTrainVCF the coverage in duplicatedSeq data'
-    log.info '                                                 for quality check. Use iarcbioinfo/mpileup-nf pipeline on BAM/BED used to generate --toTrainVCF.'
-    log.info '    if --mode scoring:'
+    log.info '    --ref                              FILE (with index)    Reference fasta file indexed.'
+    log.info '    --learning AND/OR --scoring        STRING               Indicate which mode (learning or scoring) to run.'
+    log.info ''
+    log.info '    if --learning:'
+    log.info '      --trainingTable                  TXT                  File containing variant calls used to train the model. Must contain a column "status" if'
+    log.info '                                                            options --duplicatedSeqVCF and --duplicatedSeqCov are not provided.'
+    log.info '      --features                       LIST                 List of features used to train the model separated by commas, e.g. "--features AF,DP,RVSB".'
+    log.info '                                                            Features are predifined when running with option --needlestack.'
+    log.info '      if --replication'
+    log.info '        --duplicatedSeqVCF             VCF                  Variant calls from an other sequencing, used to assign status to trainingTable.'
+    log.info '        --duplicatedSeqCov             TXT                  File containing for each sequenced position in toTrainVCF the coverage in duplicatedSeq data'
+    log.info '                                                            for quality check. Use iarcbioinfo/mpileup-nf pipeline on BAM/BED used to generate --toTrainVCF.'
+    log.info ''
+    log.info '    if --scoring:'
+    log.info '      --targetTable                    TXT                  File containing variant calls on which models would be apply.'
+    log.info '    if --scoring without --learning:'
+    log.info '      --modelSNV                       RDATA                Variant calls from an other sequencing, used to assign status to toTrainTable.'
+    log.info '      --modelINDEL                     RDATA                File containing for each sequenced position in toTrainVCF the coverage in duplicatedSeq data'
     log.info ''
     log.info 'Optional arguments:'
-    log.info '    --output_folder      FOLDER                  Output folder (default: variant-filtering-output).'
-    log.info '    --nsplit             INTEGER                 Split the input toTrainVCF to transform it into table in parallel.'
+    log.info '    --output_folder                    FOLDER               Output folder (default: vf_output).'
+    log.info '    --nsplit                           INTEGER              Split the input toTrainVCF to transform it into table in parallel.'
+    log.info '    --needlestack                      FLAG                 Specify that calling was launched with needlestack, to use predifined features.'
     log.info ''
     exit 0
 }
@@ -65,9 +74,9 @@ params.truthVCF = null
 params.duplicatedSeqVCF = null
 params.duplicatedSeqCov = null
 params.cpu = 1
-params.output_folder = 'variant-filtering-output'
+params.output_folder = 'vf_output'
 params.nsplit = 1
-params.caller = 'needlestack'
+params.needlestack = null
 
 if(params.mode == null){
   exit 1, "Please specify a mode: --mode [learning,scoring]"
@@ -84,7 +93,7 @@ if(params.mode == "learning"){
     exit 1, "Please specify either --truthVCF myfile.vcf or --duplicatedSeqVCF, not both"
     }
     if(params.duplicatedSeqVCF != null && params.duplicatedSeqCov == null){
-    exit 1, "Please provide --duplicatedSeqCov input using iarcbioinfo/mpileup-nf pipeline on BAM/BED used to generate --toTrainVCF"
+    exit 1, "Please provide --duplicatedSeqCov input using iarcbioinfo/mpileup-nf pipeline on BAM and BED used to generate --duplicatedSeqVCF"
     }
 }
 
