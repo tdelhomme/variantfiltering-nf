@@ -249,6 +249,7 @@ if(params.duplicatedSeqVCF == null) trainingTable_processed = Channel.fromPath(p
     }
 
     process mergeTables_needlestack {
+    publishDir params.output_folder+'/TRAINING/', mode: 'move', pattern: '*.txt'
 
     input:
     file all_table from splitted_Table_info_geno_features.collect()
@@ -258,8 +259,8 @@ if(params.duplicatedSeqVCF == null) trainingTable_processed = Channel.fromPath(p
 
     shell:
     '''
-    head -n1 !{all_table[0]} > !{params.trainingTable.baseName}_processed_table.txt
-    awk 'FNR>1' !{all_table} >> !{params.trainingTable.baseName}_processed_table.txt
+    head -n1 !{all_table[0]} > processed_training_table.txt
+    awk 'FNR>1' !{all_table} >> processed_training_table.txt
     '''
     }
 
