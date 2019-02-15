@@ -253,14 +253,16 @@ if(params.duplicatedSeqVCF == null) trainingTable_processed = Channel.fromPath(p
 
     input:
     file all_table from splitted_Table_info_geno_features.collect()
+    file trainingTable
 
     output:
     file "*table.txt" into trainingTable_final
 
     shell:
+    tablename = trainingTable.baseName
     '''
-    head -n1 !{all_table[0]} > processed_training_table.txt
-    awk 'FNR>1' !{all_table} >> processed_training_table.txt
+    head -n1 !{all_table[0]} > !{tablename}_processed_training_table.txt
+    awk 'FNR>1' !{all_table} >> !{tablename}_processed_training_table.txt
     '''
     }
 
