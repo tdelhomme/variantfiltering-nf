@@ -249,7 +249,7 @@ if(params.duplicatedSeqVCF == null) trainingTable_processed = Channel.fromPath(p
     }
 
     process mergeTables_needlestack {
-    publishDir params.output_folder+'/TRAINING/', mode: 'move', pattern: '*.txt'
+    publishDir params.output_folder+'/TRAINING/', mode: 'copy', pattern: '*.txt'
 
     input:
     file all_table from splitted_Table_info_geno_features.collect()
@@ -268,5 +268,20 @@ if(params.duplicatedSeqVCF == null) trainingTable_processed = Channel.fromPath(p
 
   } else {
     trainingTable_processed.into{trainingTable_final}
+  }
+
+  process compute_models{
+
+    input:
+    file table from trainingTable_final
+
+    output:
+    file "*snv*.Rdata" into snv_model
+    file "*indel*.Rdata" into indel_model
+
+    shell:
+    '''
+    Rscript !{baseDir}/bin/compute_model.r --train_table=!{table} --features=!{params.features}
+    '''
   }
 }
