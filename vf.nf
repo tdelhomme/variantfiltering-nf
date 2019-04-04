@@ -178,7 +178,7 @@ if(params.learning != null){
       ((core_lines = $nb_total_lines - $((`cat header | wc -l`)) ))
       ((lines_per_file = ( $core_lines + !{params.nsplit} - 1) / !{params.nsplit}))
       ((start=( $((`cat header | wc -l`)) +1 ) ))
-      cat !{table} | tail -n+$start | split -l $lines_per_file -a 10 --filter='{ cat header; cat; } | bgzip > $FILE.gz' - split_
+      cat !{table} | tail -n+$start | split -l $lines_per_file -a 10 --filter='{ cat header; cat; } | bgzip > $FILE.gz' - "split_$(uuidgen)_"
       '''
     }
 
