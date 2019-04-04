@@ -121,7 +121,78 @@ if(params.modelSNV != null) modelSNV = file(params.modelSNV)
 if(params.modelINDEL != null) modelINDEL = file(params.modelINDEL)
 if(params.remove_bc != null) { remove_bc_arg = "--remove_bc" } else { remove_bc_arg = "" }
 
-if(params.learning != null){
+// here we separate splitInfoGeno_needlestack,addFeatures_needlestack to the splitted processes to let the user provide needlestack table with status but without Features
+// nevertheless processes are not splitted so time is big
+  if(params.needlestack != null){
+
+    process splitTrainingTable_needlestack {
+      input:
+      file table from trainingTable_processed
+
+      output:
+      file 'split*' into splitted_Table mode flatten
+
+      shell:
+      '''
+      head -n1 !{table} | sed '/^#CHROM/q' | grep -v "<redacted>" > header
+      ((nb_total_lines= $((`cat !{table} | wc -l`)) ))
+      ((core_lines = $nb_total_lines - $((`cat header | wc -l`)) ))
+      ((lines_per_file = ( $core_lines + !{params.nsplit} - 1) / !{params.nsplit}))
+      ((start=( $((`cat header | wc -l`)) +1 ) ))
+      cat !{table} | tail -n+$start | split -l $lines_per_file -a 10 --filter='{ cat header; cat; } | bgzip > $FILE.gz' - split_
+      '''
+    }
+
+    process splitInfoGeno_needlestack{
+      publishDir params.output_folder+'/INFOGENO/', mode: 'move', pattern: '*.pdf'
+
+      input:
+      file table from splitted_Table
+
+      output:
+      file "*.txt" into splitted_Table_info_geno
+
+      shell:
+      '''
+      Rscript !{baseDir}/bin/split_INFO_GENOTYPE.r --table=!{table} --split_info --split_geno --plots
+      '''
+    }
+
+    process addFeatures_needlestack{
+
+      input:
+      file table from splitted_Table_info_geno
+
+      output:
+      file "*.txt" into splitted_Table_info_geno_features
+
+      shell:
+      '''
+      Rscript !{baseDir}/bin/add_calling_features.r --table=!{table} !{remove_bc_arg}
+      '''
+    }
+
+    process mergeTables_needlestack {
+    publishDir params.output_folder+'/TRAINING/', mode: 'copy', pattern: '*.txt'
+
+    input:
+    file all_table from splitted_Table_info_geno_features.collect()
+    file trainingTable
+
+    output:
+    file "*table.txt" into trainingTable_final
+
+    shell:
+    tablename = trainingTable.baseName
+    '''
+    head -n1 !{all_table[0]} > !{tablename}_processed_training_table.txt
+    awk 'FNR>1' !{all_table} >> !{tablename}_processed_training_table.txt
+    '''
+    }
+
+  }
+
+if(params.learning != null && params.needlestack == null){
 
   if(params.duplicatedSeqVCF != null){
 
@@ -197,76 +268,7 @@ if(params.learning != null){
 
 if(params.duplicatedSeqVCF == null) trainingTable_processed = Channel.fromPath(params.trainingTable)
 
-// here we separate splitInfoGeno_needlestack,addFeatures_needlestack to the splitted processes to let the user provide needlestack table with status but without Features
-// nevertheless processes are not splitted so time is big
-  if(params.needlestack != null){
-
-    process splitTrainingTable_needlestack {
-      input:
-      file table from trainingTable_processed
-
-      output:
-      file 'split*' into splitted_Table mode flatten
-
-      shell:
-      '''
-      head -n1 !{table} | sed '/^#CHROM/q' | grep -v "<redacted>" > header
-      ((nb_total_lines= $((`cat !{table} | wc -l`)) ))
-      ((core_lines = $nb_total_lines - $((`cat header | wc -l`)) ))
-      ((lines_per_file = ( $core_lines + !{params.nsplit} - 1) / !{params.nsplit}))
-      ((start=( $((`cat header | wc -l`)) +1 ) ))
-      cat !{table} | tail -n+$start | split -l $lines_per_file -a 10 --filter='{ cat header; cat; } | bgzip > $FILE.gz' - split_
-      '''
-    }
-
-    process splitInfoGeno_needlestack{
-      publishDir params.output_folder+'/INFOGENO/', mode: 'move', pattern: '*.pdf'
-
-      input:
-      file table from splitted_Table
-
-      output:
-      file "*.txt" into splitted_Table_info_geno
-
-      shell:
-      '''
-      Rscript !{baseDir}/bin/split_INFO_GENOTYPE.r --table=!{table} --split_info --split_geno --plots
-      '''
-    }
-
-    process addFeatures_needlestack{
-
-      input:
-      file table from splitted_Table_info_geno
-
-      output:
-      file "*.txt" into splitted_Table_info_geno_features
-
-      shell:
-      '''
-      Rscript !{baseDir}/bin/add_calling_features.r --table=!{table} !{remove_bc_arg}
-      '''
-    }
-
-    process mergeTables_needlestack {
-    publishDir params.output_folder+'/TRAINING/', mode: 'copy', pattern: '*.txt'
-
-    input:
-    file all_table from splitted_Table_info_geno_features.collect()
-    file trainingTable
-
-    output:
-    file "*table.txt" into trainingTable_final
-
-    shell:
-    tablename = trainingTable.baseName
-    '''
-    head -n1 !{all_table[0]} > !{tablename}_processed_training_table.txt
-    awk 'FNR>1' !{all_table} >> !{tablename}_processed_training_table.txt
-    '''
-    }
-
-  } else {
+if (params.needlestack == null) {
     trainingTable_processed.into{trainingTable_final}
   }
 
