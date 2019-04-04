@@ -121,13 +121,52 @@ if(params.modelSNV != null) modelSNV = file(params.modelSNV)
 if(params.modelINDEL != null) modelINDEL = file(params.modelINDEL)
 if(params.remove_bc != null) { remove_bc_arg = "--remove_bc" } else { remove_bc_arg = "" }
 
-// here we separate splitInfoGeno_needlestack,addFeatures_needlestack to the splitted processes to let the user provide needlestack table with status but without Features
+if(params.learning != null){
+
+  if(params.duplicatedSeqVCF != null){
+
+      process splitTrainingTable {
+        input:
+        file trainingTable
+
+        output:
+        file 'split*' into splitted_trainingTable mode flatten
+
+        shell:
+        '''
+        head -n1 !{trainingTable} | sed '/^#CHROM/q' | grep -v "<redacted>" > header
+        ((nb_total_lines= $((`cat !{trainingTable} | wc -l`)) ))
+        ((core_lines = $nb_total_lines - $((`cat header | wc -l`)) ))
+        ((lines_per_file = ( $core_lines + !{params.nsplit} - 1) / !{params.nsplit}))
+        ((start=( $((`cat header | wc -l`)) +1 ) ))
+        cat !{trainingTable} | tail -n+$start | split -l $lines_per_file -a 10 --filter='{ cat header; cat; } | bgzip > $FILE.gz' - split_
+        '''
+      }
+
+      process addCoverage {
+        publishDir params.output_folder+'/COVERAGE/', mode: 'move', pattern: '*.pdf'
+
+        input:
+        file duplicatedSeqCov
+        file strainingTable from splitted_trainingTable
+
+        output:
+        file "*.txt" into trainingTableCov mode flatten
+        file  "*.pdf" into PDFoutput
+
+        shell:
+        '''
+        Rscript !{baseDir}/bin/add_coverage_to_annot.r --coverage=!{duplicatedSeqCov} --table=!{strainingTable} !{remove_bc_arg} --plot_coverage
+        '''
+      }
+      
+      // here we separate splitInfoGeno_needlestack,addFeatures_needlestack to the splitted processes to let the user provide needlestack table with status but without Features
 // nevertheless processes are not splitted so time is big
   if(params.needlestack != null){
 
     process splitTrainingTable_needlestack {
       input:
-      file table from trainingTable_processed
+      file table from trainingTableCov
 
       output:
       file 'split*' into splitted_Table mode flatten
@@ -180,7 +219,7 @@ if(params.remove_bc != null) { remove_bc_arg = "--remove_bc" } else { remove_bc_
     file trainingTable
 
     output:
-    file "*table.txt" into trainingTable_final
+    file "*table.txt" into trainingTableCov2
 
     shell:
     tablename = trainingTable.baseName
@@ -190,51 +229,11 @@ if(params.remove_bc != null) { remove_bc_arg = "--remove_bc" } else { remove_bc_
     '''
     }
 
-  }
-
-if(params.learning != null && params.needlestack == null){
-
-  if(params.duplicatedSeqVCF != null){
-
-      process splitTrainingTable {
-        input:
-        file trainingTable
-
-        output:
-        file 'split*' into splitted_trainingTable mode flatten
-
-        shell:
-        '''
-        head -n1 !{trainingTable} | sed '/^#CHROM/q' | grep -v "<redacted>" > header
-        ((nb_total_lines= $((`cat !{trainingTable} | wc -l`)) ))
-        ((core_lines = $nb_total_lines - $((`cat header | wc -l`)) ))
-        ((lines_per_file = ( $core_lines + !{params.nsplit} - 1) / !{params.nsplit}))
-        ((start=( $((`cat header | wc -l`)) +1 ) ))
-        cat !{trainingTable} | tail -n+$start | split -l $lines_per_file -a 10 --filter='{ cat header; cat; } | bgzip > $FILE.gz' - split_
-        '''
-      }
-
-      process addCoverage {
-        publishDir params.output_folder+'/COVERAGE/', mode: 'move', pattern: '*.pdf'
-
-        input:
-        file duplicatedSeqCov
-        file strainingTable from splitted_trainingTable
-
-        output:
-        file "*.txt" into trainingTableCov mode flatten
-        file  "*.pdf" into PDFoutput
-
-        shell:
-        '''
-        Rscript !{baseDir}/bin/add_coverage_to_annot.r --coverage=!{duplicatedSeqCov} --table=!{strainingTable} !{remove_bc_arg} --plot_coverage
-        '''
-      }
-
+  } else { trainingTableCov.into(trainingTableCov2) }
       process addStatus {
 
       input:
-      file table from trainingTableCov
+      file table from trainingTableCov2
       file duplicatedSeqVCF
 
       output:
@@ -255,7 +254,7 @@ if(params.learning != null && params.needlestack == null){
       file all_table from trainingTableCov_ready_status.collect()
 
       output:
-      file "*table.txt" into trainingTable_processed
+      file "*table.txt" into trainingTable_final
 
       shell:
       '''
@@ -266,11 +265,7 @@ if(params.learning != null && params.needlestack == null){
   }
 
 
-if(params.duplicatedSeqVCF == null) trainingTable_processed = Channel.fromPath(params.trainingTable)
-
-if (params.needlestack == null) {
-    trainingTable_processed.into{trainingTable_final}
-  }
+if(params.duplicatedSeqVCF == null) trainingTable_final = Channel.fromPath(params.trainingTable)
 
   process compute_models{
 
