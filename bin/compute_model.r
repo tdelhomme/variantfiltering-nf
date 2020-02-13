@@ -55,9 +55,8 @@ for(type in c("snv","indel")){
   rf = randomForest(as.factor(status) ~ .,
                     data = train_table[,my_features],
                     importance = TRUE, # to allow us to inspect variable importance
-                    ntree = 50000, sampsize = as.numeric(table(train_table$status)["TP"], probs=T) #classwt = c(propTP, propFP), # weighted FP by propTP and TP by propFP
-                    # ,maxnodes=10, nodesize=20
-  )
+                    ntree = 50000, sampsize = as.numeric(table(train_table$status)["TP"]), probs=T)
+  
   assign(paste("rf_",type,sep=""), rf)
   save(list=paste("rf_",type,sep=""), file = paste(output_folder,"/RF_model_",type,".Rdata",sep=""))
 }
